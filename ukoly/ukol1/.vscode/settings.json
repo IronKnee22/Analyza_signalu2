@@ -1,0 +1,27 @@
+{
+    "cSpell.words": [
+        "bandpass",
+        "bandstop",
+        "btype",
+        "coeff",
+        "fftfreq",
+        "fftpack",
+        "filtfilt",
+        "firwin",
+        "freqs",
+        "freqz",
+        "highcut",
+        "iirnotch",
+        "lfilter",
+        "loadmat",
+        "lowcut",
+        "medfilt",
+        "nyquist",
+        "padx",
+        "rfft",
+        "rfftfreq",
+        "RMSSD",
+        "SDNN",
+        "tkagg"
+    ]
+}
