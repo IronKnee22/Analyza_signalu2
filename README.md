@@ -1,1 +1,1 @@
-"# Analyza_signalu2" 
+# Analyza_signalu2
