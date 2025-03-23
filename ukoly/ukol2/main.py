@@ -34,19 +34,19 @@ def detect_advanced_decelerations(signal, baseline, fs):
     while i < len(signal):
         if under_10[i]:
             start = i
-            # Hledáme konec podle tří možných kritérií
+            
             while i < len(signal):
-                if signal[i] > baseline[i]:  # překročil baseline
+                if signal[i] > baseline[i]:  
                     break
-                elif all(under_5[i:i+40]):  # 10s pod 5 bpm
+                elif all(under_5[i:i+40]):  
                     i += 40
                     break
-                elif all(between_5_10[i:i+72]):  # 18s mezi 5-10 bpm
+                elif all(between_5_10[i:i+72]):  
                     i += 72
                     break
                 i += 1
             end = i
-            if end - start >= fs * 15:  # 15s trvání
+            if end - start >= fs * 15:  
                 decel_regions.append((start, end))
         i += 1
     return decel_regions
@@ -64,7 +64,7 @@ def detect_accel_and_decel(signal, baseline, fs):
     accel_regions = []
     decel_regions = []
 
-    # --- Akcelerace ---
+    
     above_10 = signal > (baseline + 10)
     i = 0
     while i < len(signal):
@@ -78,7 +78,7 @@ def detect_accel_and_decel(signal, baseline, fs):
         else:
             i += 1
 
-    # --- Decelerace ---
+    
     under_5 = signal < (baseline - 5)
     under_10 = signal < (baseline - 10)
     between_5_10 = (signal >= (baseline - 10)) & (signal < (baseline - 5))
@@ -88,12 +88,12 @@ def detect_accel_and_decel(signal, baseline, fs):
         if under_10[i]:
             start = i
             while i < len(signal):
-                if signal[i] > baseline[i]:  # překročí baseline
+                if signal[i] > baseline[i]:  
                     break
-                elif all(under_5[i:i+40]):  # 10s pod 5 bpm
+                elif all(under_5[i:i+40]):  
                     i += 40
                     break
-                elif all(between_5_10[i:i+72]):  # 18s mezi 5–10 bpm
+                elif all(between_5_10[i:i+72]):  
                     i += 72
                     break
                 i += 1
@@ -104,7 +104,140 @@ def detect_accel_and_decel(signal, baseline, fs):
 
     return accel_regions, decel_regions
 
-# === Načtení a interpolace ===
+def interpolace(fhr_nan,t):
+    valid_idx = ~np.isnan(fhr_nan)
+    nan_idx = np.isnan(fhr_nan)
+
+    pchip = PchipInterpolator(t[valid_idx], fhr_nan[valid_idx])
+    fhr_interp = fhr_nan.copy()
+    fhr_interp[nan_idx] = pchip(t[nan_idx])
+    return fhr_interp
+
+def baseline(fhr_interp, t, fs):
+    iterations = []
+    filtered_signals = []
+
+    s1, b1 = baseline_iteration(fhr_interp, t, fs, cutoff=0.008, lower_thresh=5, upper_thresh=5)
+    iterations.append(b1)
+    filtered_signals.append(s1)
+
+    s2, b2 = baseline_iteration(s1, t, fs, cutoff=0.006, lower_thresh=5, upper_thresh=5)
+    iterations.append(b2)
+    filtered_signals.append(s2)
+
+    s3, b3 = baseline_iteration(s2, t, fs, cutoff=0.006, lower_thresh=5, upper_thresh=5)
+    iterations.append(b3)
+    filtered_signals.append(s3)
+
+    s4, b4 = baseline_iteration(s3, t, fs, cutoff=0.006, lower_thresh=10, upper_thresh=5)
+    iterations.append(b4)
+    filtered_signals.append(s4)    
+    return iterations, filtered_signals
+
+def plots_akce_deakce(t, fhr, fhr_interp, iterations, filtered_signals, fs):
+    plt.figure(figsize=(12, 6))
+    
+    # 1. Původní signál
+    plt.subplot(2, 1, 1)
+    plt.plot(t, fhr, color='black')
+    plt.title("Původní FHR signál")
+    plt.xlabel("Čas [s]")
+    plt.ylabel("Frekvence [bpm]")
+    plt.grid(True)
+
+    # 2. Interpolace
+    plt.subplot(2, 1, 2)
+    plt.plot(t, fhr, label='Původní', color='gray')
+    plt.plot(t, fhr_interp, color='red', label='Interpolovaný')
+    plt.title("Interpolace chybějících hodnot ve FHR signálu")
+    plt.xlabel("Čas [s]")
+    plt.ylabel("Frekvence [bpm]")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+
+    # 3. Iterace baseline
+    plt.figure(figsize=(14, 6))
+    plt.plot(t, fhr_interp, label='Interpolovaný FHR', color='lightgray', linewidth=1)
+
+    colors = ['blue', 'green', 'orange', 'red']
+    for i, b in enumerate(iterations):
+        plt.plot(t, b, label=f'Baseline - Iterace {i+1}', color=colors[i], linewidth=1.5)
+
+    plt.title("Iterativní odhad baseline dle Taylorovy metody")
+    plt.xlabel("Čas [s]")
+    plt.ylabel("Frekvence [bpm]")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+
+    # 4. Akcelerace/decelerace a očištěný signál
+    num_signals = len(filtered_signals)
+    signals_per_figure = 4
+
+    for fig_index in range(0, num_signals, signals_per_figure):
+        fig1, axs1 = plt.subplots(4, 1, figsize=(14, 12), sharex=True)
+        fig2, axs2 = plt.subplots(4, 1, figsize=(14, 12), sharex=True)
+
+        for i in range(signals_per_figure):
+            idx = fig_index + i
+            if idx >= num_signals:
+                break
+
+            baseline = iterations[idx]
+            accel_regions, decel_regions = detect_accel_and_decel(fhr_interp, baseline, fs)
+            cleaned_signal = remove_regions(fhr_interp, accel_regions + decel_regions)
+
+            # Graf 1: Detekce akcelerací a decelerací
+            ax1 = axs1[i]
+            ax1.plot(t, fhr_interp, label='FHR', color='black', alpha=0.6)
+            ax1.plot(t, baseline, label='Baseline', color='red', linewidth=1)
+
+            for j, (start, _) in enumerate(accel_regions):
+                ax1.plot(t[start], baseline[start], '^', color='green', label='Akcelerace' if j == 0 else "")
+            for j, (start, _) in enumerate(decel_regions):
+                ax1.plot(t[start], baseline[start], 'v', color='blue', label='Decelerace' if j == 0 else "")
+
+            ax1.set_title(f'Iterace {idx+1} - Detekce akcelerací a decelerací')
+            ax1.set_xlabel("Čas [s]")
+            ax1.set_ylabel("Frekvence [bpm]")
+            ax1.legend(loc='upper right')
+            ax1.grid(True)
+
+            # Graf 2: Očištěný signál
+            ax2 = axs2[i]
+            ax2.plot(t, fhr_interp, label='Původní signál', color='gray', alpha=0.6)
+            ax2.plot(t, cleaned_signal, label='Signál bez akcelerací/decelerací', color='black')
+            ax2.plot(t, baseline, label='Baseline', color='red')
+
+            for j, (start, _) in enumerate(accel_regions):
+                ax2.plot(t[start], baseline[start], '^', color='green', label='Akcelerace' if j == 0 else "")
+            for j, (start, _) in enumerate(decel_regions):
+                ax2.plot(t[start], baseline[start], 'v', color='blue', label='Decelerace' if j == 0 else "")
+
+            ax2.set_title(f'Iterace {idx+1} - Očištěný signál')
+            ax2.set_xlabel("Čas [s]")
+            ax2.set_ylabel("Frekvence [bpm]")
+            ax2.legend(loc='upper right')
+            ax2.grid(True)
+
+        plt.tight_layout()
+
+    return cleaned_signal
+
+
+def vypis_parametrizaci(iterations, fhr_interp, fs):
+    print("\n--- Parametrizace iterací ---")
+    for i, baseline in enumerate(iterations):
+        accel, decel = detect_accel_and_decel(fhr_interp, baseline, fs)
+        print(f"Iterace {i+1}:")
+        print(f" - Akcelerací: {len(accel)}")
+        print(f" - Decelerací: {len(decel)}")
+        print(f" - Baseline: min={np.min(baseline):.2f}, max={np.max(baseline):.2f}, mean={np.mean(baseline):.2f}")
+        print("")
+
+
+
 mat = scipy.io.loadmat(r'data/data_FHR.mat')
 fhr = mat['fhr'][:, 0].astype(float)
 
@@ -114,141 +247,51 @@ fhr_nan[fhr_nan == 0] = np.nan
 fs = 4  # Hz
 t = np.arange(len(fhr_nan)) / fs 
 
-valid_idx = ~np.isnan(fhr_nan)
-nan_idx = np.isnan(fhr_nan)
+# 1. iterace
+fhr_interp = interpolace(fhr_nan,t)
 
-pchip = PchipInterpolator(t[valid_idx], fhr_nan[valid_idx])
-fhr_interp = fhr_nan.copy()
-fhr_interp[nan_idx] = pchip(t[nan_idx])
-
-# === Iterace baseline ===
-iterations = []
-filtered_signals = []
-
-s1, b1 = baseline_iteration(fhr_interp, t, fs, cutoff=0.008, lower_thresh=5, upper_thresh=5)
-iterations.append(b1)
-filtered_signals.append(s1)
-
-s2, b2 = baseline_iteration(s1, t, fs, cutoff=0.006, lower_thresh=5, upper_thresh=5)
-iterations.append(b2)
-filtered_signals.append(s2)
-
-s3, b3 = baseline_iteration(s2, t, fs, cutoff=0.006, lower_thresh=5, upper_thresh=5)
-iterations.append(b3)
-filtered_signals.append(s3)
-
-s4, b4 = baseline_iteration(s3, t, fs, cutoff=0.006, lower_thresh=10, upper_thresh=5)
-iterations.append(b4)
-filtered_signals.append(s4)
+iterations, filtered_signals = baseline(fhr_interp, t, fs)
+vypis_parametrizaci(iterations, fhr_interp, fs)
 
 
-plt.figure()
+cleaned_signal = plots_akce_deakce(t, fhr, fhr_interp, iterations, filtered_signals, fs)
+fhr_nan = cleaned_signal.copy()
+fhr_nan[fhr_nan == 0] = np.nan
 
-plt.subplot(2, 1, 1)
-plt.plot(t, fhr)
-plt.title("Původní FHR signál")
+# 2. iterace
+fhr_interp = interpolace(fhr_nan,t)
 
-plt.subplot(2, 1, 2)
-plt.plot(t, fhr, label='Původní')
-plt.plot(t, fhr_interp, color='red', label='Interpolovaný')
-plt.title("Interpolace chybějících hodnot")
-plt.legend()
-
-plt.tight_layout()
+iterations, filtered_signals = baseline(fhr_interp, t, fs)
+vypis_parametrizaci(iterations, fhr_interp, fs)
 
 
-plt.figure()
-plt.plot(t, fhr_interp, label='Interpolovaný FHR', color='lightgray', linewidth=1)
+cleaned_signal = plots_akce_deakce(t, fhr, fhr_interp, iterations, filtered_signals, fs)
+fhr_nan = cleaned_signal.copy()
+fhr_nan[fhr_nan == 0] = np.nan
 
-colors = ['blue', 'green', 'orange', 'red']
-for i, b in enumerate(iterations):
-    plt.plot(t, b, label=f'Baseline iterace {i+1}', color=colors[i], linewidth=1.5)
+# 3. iterace
+fhr_interp = interpolace(fhr_nan,t)
 
-plt.xlabel('Čas [s]')
-plt.ylabel('Frekvence [bpm]')
-plt.title('Iterativní odhad baseline (Taylor)')
-plt.legend()
+iterations, filtered_signals = baseline(fhr_interp, t, fs)
+vypis_parametrizaci(iterations, fhr_interp, fs)
+
+
+cleaned_signal = plots_akce_deakce(t, fhr, fhr_interp, iterations, filtered_signals, fs)
+
+fhr_nan = cleaned_signal.copy()
+fhr_nan[fhr_nan == 0] = np.nan
+fhr_interp = interpolace(fhr_nan,t)
+
+plt.figure(figsize=(12, 5))
+plt.plot(t, fhr_interp, color='black')
+plt.title("Finální FHR signál po 3 iteracích čištění")
+plt.xlabel("Čas [s]")
+plt.ylabel("Frekvence [bpm]")
 plt.grid(True)
 plt.tight_layout()
+plt.show()
 
 
-
-num_signals = len(filtered_signals)
-signals_per_figure = 4
-
-for fig_index in range(0, num_signals, signals_per_figure):
-    fig, axs = plt.subplots(4, 1, figsize=(14, 12), sharex=True)
-    fig.suptitle(f'Původní signály s baseline a značkami (signály {fig_index}–{fig_index + signals_per_figure - 1})', fontsize=16)
-
-    for i in range(signals_per_figure):
-        idx = fig_index + i
-        if idx >= num_signals:
-            break
-
-        signal = filtered_signals[idx]
-        baseline = iterations[idx]
-        accel_regions, decel_regions = detect_accel_and_decel(fhr_interp, baseline, fs)
-
-        ax = axs[i]
-        ax.plot(t, signal, label='FHR', color='black', alpha=0.6)
-        ax.plot(t, baseline, label='Baseline', color='red')
-
-        for start, _ in accel_regions:
-            ax.plot(t[start], baseline[start], '^', color='green', label='Akcelerace' if start == accel_regions[0][0] else "")
-        for start, _ in decel_regions:
-            ax.plot(t[start], baseline[start], 'v', color='blue', label='Decelerace' if start == decel_regions[0][0] else "")
-
-        ax.set_title(f'Signál {idx}')
-        ax.legend(loc='upper right')
-        ax.grid(True)
-
-for fig_index in range(0, num_signals, signals_per_figure):
-    fig1, axs1 = plt.subplots(4, 1, figsize=(14, 12), sharex=True)
-    fig2, axs2 = plt.subplots(4, 1, figsize=(14, 12), sharex=True)
-
-    for i in range(signals_per_figure):
-        idx = fig_index + i
-        if idx >= num_signals:
-            break
-
-        signal = filtered_signals[idx]
-        baseline = iterations[idx]
-        accel_regions, decel_regions = detect_accel_and_decel(fhr_interp, baseline, fs)
-        cleaned_signal = remove_regions(signal, accel_regions + decel_regions)
-
-        # Původní signál
-        ax1 = axs1[i]
-        ax1.plot(t, signal, label='FHR', color='black', alpha=0.6)
-        ax1.plot(t, baseline, label='Baseline', color='red')
-
-        for start, _ in accel_regions:
-            ax1.plot(t[start], baseline[start], '^', color='green', label='Akcelerace' if start == accel_regions[0][0] else "")
-        for start, _ in decel_regions:
-            ax1.plot(t[start], baseline[start], 'v', color='blue', label='Decelerace' if start == decel_regions[0][0] else "")
-
-        ax1.set_title(f'Iterace {idx+1}')
-        ax1.legend(loc='upper right')
-        ax1.grid(True)
-
-        # Očištěný signál
-        ax2 = axs2[i]
-        ax2.plot(t, signal, label='Původní signál', color='gray', alpha=0.6)
-        ax2.plot(t, cleaned_signal, label='Bez akcelerací/decelerací', color='black')
-        ax2.plot(t, baseline, label='Baseline', color='red')
-
-        for start, _ in accel_regions:
-            ax2.plot(t[start], baseline[start], '^', color='green', label='Akcelerace' if start == accel_regions[0][0] else "")
-        for start, _ in decel_regions:
-            ax2.plot(t[start], baseline[start], 'v', color='blue', label='Decelerace' if start == decel_regions[0][0] else "")
-
-        ax2.set_title(f'Iterace {idx+1}')
-        ax2.legend(loc='upper right')
-        ax2.grid(True)
-
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 
 plt.show()
 
-# TODO: figure 2 se rozmyslet ale podle mě může jít klidně pryč
-# TODO: dát to nějak hezky do funkcí protože je potřeba aby se to provedlo celé ještě 3
-# TODO: Nakonec tam musím hodit ještě nějakou diskuzi

@@ -1,6 +1,7 @@
 {
     "cSpell.words": [
         "btype",
+        "deakce",
         "decel",
         "Decelerace",
         "Decelerací",
@@ -9,6 +10,8 @@
         "lightgray",
         "loadmat",
         "lowpass",
-        "Pchip"
+        "Pchip",
+        "sharex",
+        "suptitle"
     ]
 }

@@ -1,0 +1,1 @@
+S každou iterací došlo ke zpřesnění odhadu baseline, což se projevilo snížením počtu detekovaných akcelerací a decelerací. To odpovídá očekávání Taylorovy metody, kde postupné očišťování signálu umožňuje lepší filtraci a stabilizaci odhadu bazální linie.
