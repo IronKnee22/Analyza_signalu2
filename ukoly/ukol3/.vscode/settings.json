@@ -4,12 +4,14 @@
         "boxplots",
         "boxplotů",
         "btype",
+        "darsa",
         "filtfilt",
         "freqs",
         "highcut",
         "loadmat",
         "lowcut",
         "ndarray",
-        "nperseg"
+        "nperseg",
+        "savetxt"
     ]
 }
